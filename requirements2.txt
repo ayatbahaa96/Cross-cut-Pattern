@@ -1,0 +1,10 @@
+streamlit>=1.33.0
+tensorflow==2.15.0
+tensorflow-io-gcs-filesystem<0.37.0
+opencv-python
+pillow
+plotly
+pandas
+numpy
+streamlit-drawable-canvas
+streamlit-image-coordinates
