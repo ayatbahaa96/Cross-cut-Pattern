@@ -7,4 +7,6 @@ plotly
 pandas
 numpy
 streamlit-drawable-canvas
+
 streamlit-image-coordinates
+streamlit-drawable-canvas==0.8.0
