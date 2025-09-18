@@ -1,14 +1,11 @@
 streamlit==1.28.1
-opencv-python-headless==4.8.1.78
-Pillow==10.0.1
-numpy==1.24.3
-plotly==5.17.0
-pandas==2.0.3
-scikit-learn==1.3.0
-matplotlib==3.7.2
-# seaborn only if you use it (optional)
-# seaborn==0.12.2
+opencv-python-headless==4.10.0.84    # latest at time of writing
+Pillow>=11.0.0                       # 11.x has wheels for Python 3.13
+numpy>=2.1.1                         # NumPy 2.x has wheels for Python 3.13
+plotly==5.24.1
+pandas==2.2.2
+scikit-learn==1.5.2
+matplotlib==3.9.2
 streamlit-drawable-canvas
 streamlit-image-coordinates
-# tensorflow removed — add back only if required and if you confirm the platform supports it
-# tensorflow-cpu==2.13.0   # <-- enable only if you really need TF and tested locally
+# tensorflow-cpu>=2.17.0  # only if really needed and check Py3.13 wheel availability
