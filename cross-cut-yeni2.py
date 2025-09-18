@@ -5,13 +5,18 @@ from PIL import Image
 import plotly.express as px
 import pandas as pd
 
-# Mouse-based selection için kütüphane
+# Mouse-based selection için alternatif kütüphane
 try:
     from streamlit_drawable_canvas import st_canvas
     CANVAS_AVAILABLE = True
 except ImportError:
-    CANVAS_AVAILABLE = False
-    st.error("streamlit-drawable-canvas kütüphanesi bulunamadı. Kurulum: pip install streamlit-drawable-canvas")
+    try:
+        # Alternatif: streamlit-image-coordinates
+        from streamlit_image_coordinates import streamlit_image_coordinates
+        CANVAS_AVAILABLE = "coordinates"
+    except ImportError:
+        CANVAS_AVAILABLE = False
+        st.error("Mouse desteği için kütüphane kurun: pip install streamlit-image-coordinates")
 
 try:
     from skimage.measure import regionprops, label
@@ -481,7 +486,8 @@ def main_pattern_recognition():
             # Mouse ile grid seçimi
             st.subheader("Grid Alanı Seçimi - Mouse Drag & Drop")
             
-            if CANVAS_AVAILABLE:
+            if CANVAS_AVAILABLE == True:
+                # streamlit-drawable-canvas çalışıyor
                 st.markdown("""
                 <div style="background: #e8f4fd; padding: 15px; border-left: 5px solid #3498db; margin: 15px 0;">
                     <strong>Mouse İle Grid Seçimi:</strong><br>
@@ -492,7 +498,6 @@ def main_pattern_recognition():
                 </div>
                 """, unsafe_allow_html=True)
                 
-                # Orijinal boyutları kullan
                 canvas_width = img_width
                 canvas_height = img_height
                 scale_x = 1.0
@@ -501,10 +506,8 @@ def main_pattern_recognition():
                 
                 st.info(f"Canvas: {canvas_width}x{canvas_height} (1:1 Orijinal Boyut)")
                 
-                # Canvas'ı tam genişlikte göster
                 st.markdown("### Canvas - Tam Boyut Görüntü")
                 
-                # Streamlit drawable canvas - özel CSS ile
                 st.markdown("""
                 <style>
                 .streamlit-drawable-canvas > div {
@@ -514,21 +517,106 @@ def main_pattern_recognition():
                 </style>
                 """, unsafe_allow_html=True)
                 
-                canvas_result = st_canvas(
-                    fill_color="rgba(0, 255, 0, 0.1)",
-                    stroke_width=3,
-                    stroke_color="#00FF00",
-                    background_image=display_image,
-                    update_streamlit=True,
-                    height=canvas_height,
-                    width=canvas_width,
-                    drawing_mode="rect",
-                    point_display_radius=0,
-                    display_toolbar=True,
-                    key="grid_canvas",
-                )
+                try:
+                    canvas_result = st_canvas(
+                        fill_color="rgba(0, 255, 0, 0.1)",
+                        stroke_width=3,
+                        stroke_color="#00FF00",
+                        background_image=display_image,
+                        update_streamlit=True,
+                        height=canvas_height,
+                        width=canvas_width,
+                        drawing_mode="rect",
+                        point_display_radius=0,
+                        display_toolbar=True,
+                        key="grid_canvas",
+                    )
+                except Exception as e:
+                    st.error(f"Canvas hatası: {e}")
+                    st.error("Streamlit sürümü uyumsuz. Alternatif coordinate picker kullanılıyor.")
+                    CANVAS_AVAILABLE = False
                 
-                st.markdown("---")  # Ayırıcı çizgi
+                st.markdown("---")
+                
+            elif CANVAS_AVAILABLE == "coordinates":
+                # streamlit-image-coordinates kullan
+                st.markdown("""
+                <div style="background: #e8f4fd; padding: 15px; border-left: 5px solid #3498db; margin: 15px 0;">
+                    <strong>Click İle Grid Seçimi:</strong><br>
+                    1. Önce sol üst köşeyi tıklayın<br>
+                    2. Sonra sağ alt köşeyi tıklayın<br>
+                    3. Grid otomatik oluşacak
+                </div>
+                """, unsafe_allow_html=True)
+                
+                # İki tıklama sistemi
+                if 'click_count' not in st.session_state:
+                    st.session_state.click_count = 0
+                if 'first_click' not in st.session_state:
+                    st.session_state.first_click = None
+                
+                st.write(f"Tıklama adımı: {st.session_state.click_count + 1}/2")
+                
+                value = streamlit_image_coordinates(image, key="image_coords")
+                
+                if value is not None:
+                    if st.session_state.click_count == 0:
+                        st.session_state.first_click = value
+                        st.session_state.click_count = 1
+                        st.info(f"İlk nokta seçildi: ({value['x']}, {value['y']}). Şimdi ikinci noktayı seçin.")
+                    elif st.session_state.click_count == 1:
+                        # İkinci tıklama
+                        x1, y1 = st.session_state.first_click['x'], st.session_state.first_click['y']
+                        x2, y2 = value['x'], value['y']
+                        
+                        # Grid koordinatları
+                        grid_x = min(x1, x2)
+                        grid_y = min(y1, y2)
+                        grid_w = abs(x2 - x1)
+                        grid_h = abs(y2 - y1)
+                        
+                        # Kare yap
+                        min_size = min(grid_w, grid_h)
+                        grid_w = min_size
+                        grid_h = min_size
+                        
+                        st.success(f"Grid seçildi: ({grid_x}, {grid_y}) - {grid_w}x{grid_h}")
+                        
+                        # Preview göster
+                        preview_img = classifier.draw_selection_overlay(img_array, grid_x, grid_y, grid_w, grid_h)
+                        st.image(preview_img, caption="Seçilen Grid", use_column_width=True)
+                        
+                        # Koordinatları kaydet
+                        st.session_state.mouse_selected_coords = (grid_x, grid_y, grid_w, grid_h)
+                        
+                        if st.button("Yeni Seçim"):
+                            st.session_state.click_count = 0
+                            st.session_state.first_click = None
+                            st.rerun()
+                
+            else:
+                # Fallback: Manuel koordinat girişi
+                st.error("Mouse desteği için şu komutlardan birini çalıştırın:")
+                st.code("pip install streamlit-image-coordinates")
+                st.code("# veya")  
+                st.code("pip install streamlit-drawable-canvas==0.8.0")
+                
+                st.markdown("**Manuel Grid Seçimi:**")
+                col_manual1, col_manual2 = st.columns(2)
+                
+                with col_manual1:
+                    manual_x = st.number_input("Grid X", 0, img_width-100, img_width//4)
+                    manual_y = st.number_input("Grid Y", 0, img_height-100, img_height//4)
+                
+                with col_manual2:
+                    manual_size = st.number_input("Grid Boyutu", 50, min(img_width, img_height), min(img_width, img_height)//3)
+                
+                # Manuel preview
+                preview_img = classifier.draw_selection_overlay(img_array, manual_x, manual_y, manual_size, manual_size)
+                st.image(preview_img, caption="Manuel Grid Seçimi", use_column_width=True)
+                
+                # Manuel koordinatları kaydet
+                st.session_state.mouse_selected_coords = (manual_x, manual_y, manual_size, manual_size)
                 
                 # Canvas'tan grid koordinatlarını al
                 grid_selected = False
@@ -683,7 +771,7 @@ def main_pattern_recognition():
         else:
             st.info("Cross-cut test görüntünüzü yükleyin")
     
-    with col1:
+    with col2:
         st.header("Pattern Analizi Sonuçları")
         
         if 'pattern_result' in st.session_state:
