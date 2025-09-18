@@ -690,26 +690,26 @@ def main_pattern_recognition():
                 if not grid_selected:
                     st.info("Yukarıdaki görüntü üzerinde mouse ile bir dikdörtgen çizin.")
                     
-            else:
+                else:
                 # Fallback: streamlit-drawable-canvas yok ise
-                st.error("Mouse desteği için şu komutu çalıştırın:")
-                st.code("pip install streamlit-drawable-canvas")
-                
-                st.markdown("**Alternatif: Koordinat Girişi**")
-                col_coord1, col_coord2 = st.columns(2)
-                with col_coord1:
-                    manual_x = st.number_input("Grid X", 0, img_width-100, img_width//4)
-                    manual_y = st.number_input("Grid Y", 0, img_height-100, img_height//4)
-                with col_coord2:
-                    manual_w = st.number_input("Grid Genişlik", 50, img_width, min(img_width, img_height)//3)
-                    manual_h = st.number_input("Grid Yükseklik", 50, img_height, min(img_width, img_height)//3)
-                
-                # Manual preview
-                preview_img = classifier.draw_selection_overlay(img_array, manual_x, manual_y, manual_w, manual_h)
-                st.image(preview_img, caption="Manuel Grid Seçimi", use_column_width=True)
-                
-                # Manual koordinatları kaydet
-                st.session_state.mouse_selected_coords = (manual_x, manual_y, manual_w, manual_h)
+                    st.error("Mouse desteği için şu komutu çalıştırın:")
+                    st.code("pip install streamlit-drawable-canvas")
+                    
+                    st.markdown("**Alternatif: Koordinat Girişi**")
+                    col_coord1, col_coord2 = st.columns(2)
+                    with col_coord1:
+                        manual_x = st.number_input("Grid X", 0, img_width-100, img_width//4)
+                        manual_y = st.number_input("Grid Y", 0, img_height-100, img_height//4)
+                    with col_coord2:
+                        manual_w = st.number_input("Grid Genişlik", 50, img_width, min(img_width, img_height)//3)
+                        manual_h = st.number_input("Grid Yükseklik", 50, img_height, min(img_width, img_height)//3)
+                    
+                    # Manual preview
+                    preview_img = classifier.draw_selection_overlay(img_array, manual_x, manual_y, manual_w, manual_h)
+                    st.image(preview_img, caption="Manuel Grid Seçimi", use_column_width=True)
+                    
+                    # Manual koordinatları kaydet
+                    st.session_state.mouse_selected_coords = (manual_x, manual_y, manual_w, manual_h)
             
             # Pattern analizi başlat
             if st.button("🔍 Pattern Recognition Analizi", type="primary", use_container_width=True):
@@ -771,7 +771,7 @@ def main_pattern_recognition():
         else:
             st.info("Cross-cut test görüntünüzü yükleyin")
     
-    with col2:
+    with col1:
         st.header("Pattern Analizi Sonuçları")
         
         if 'pattern_result' in st.session_state:
