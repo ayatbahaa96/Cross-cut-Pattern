@@ -8,9 +8,10 @@ pandas>=2.2
 scikit-learn>=1.5
 matplotlib>=3.9
 seaborn>=0.13
-streamlit-drawable-canvas
+# streamlit-drawable-canvas
 streamlit-image-coordinates
 streamlit-drawable-canvas==0.8.0
 # tensorflow-cpu>=2.17.0  # only if really needed and check Py3.13 wheel availability
+
 
 
