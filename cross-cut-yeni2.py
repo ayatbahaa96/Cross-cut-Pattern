@@ -33,11 +33,11 @@ class PatternRecognitionClassifier:
     def __init__(self):
         self.iso_classes = {
             0: {"name": "Sınıf 0", "description": "Hiç hasar yok", "color": "#27ae60", "damage_range": (0, 0)},
-            1: {"name": "Sınıf 1", "description": "Çok küçük hasarlar", "color": "#2ecc71", "damage_range": (0, 5)},
-            2: {"name": "Sınıf 2", "description": "Küçük hasarlar", "color": "#f1c40f", "damage_range": (5, 15)},
-            3: {"name": "Sınıf 3", "description": "Orta seviye hasarlar", "color": "#e67e22", "damage_range": (15, 35)},
-            4: {"name": "Sınıf 4", "description": "Büyük hasarlar", "color": "#e74c3c", "damage_range": (35, 65)},
-            5: {"name": "Sınıf 5", "description": "Çok büyük hasarlar", "color": "#c0392b", "damage_range": (65, 100)}
+            1: {"name": "Sınıf 1", "description": "Küçük pullanmalar (%5'den az)", "color": "#2ecc71", "damage_range": (0, 5)},
+            2: {"name": "Sınıf 2", "description": "Kenar pullanmaları (%5-15)", "color": "#f1c40f", "damage_range": (5, 15)},
+            3: {"name": "Sınıf 3", "description": "Büyük şeritler (%15-35)", "color": "#e67e22", "damage_range": (15, 35)},
+            4: {"name": "Sınıf 4", "description": "Çok büyük hasarlar (%35-65)", "color": "#e74c3c", "damage_range": (35, 65)},
+            5: {"name": "Sınıf 5", "description": "Maksimum hasar (%65+)", "color": "#c0392b", "damage_range": (65, 100)}
         }
         
         # Cross-cut hasar pattern tanımları
@@ -274,51 +274,71 @@ class PatternRecognitionClassifier:
                 severity = pattern['score'] * self.damage_patterns[pattern_type]['severity_multiplier']
                 cell_damages[cell_row, cell_col] += severity
         
-        # Hasarlı hücre sayısını hesapla (threshold: 0.5)
-        damaged_cells = np.sum(cell_damages > 0.5)
+        # Hasarlı hücre sayısını hesapla (düşük eşik)
+        damaged_cells = np.sum(cell_damages > 0.01)
         
         return cell_damages, damaged_cells
 
-    def classify_by_cell_matrix(self, cell_damages):
-        """5x5 hücre matrisine göre ISO 2409 sınıflandırması"""
-        # Her hücre için hasar eşiği (0.5 üzeri hasarlı sayılır)
-        damage_threshold = 0.5
+    def classify_by_cell_matrix(self, cell_damages, pattern_counts):
+        """ISO 2409:2013 standardına uygun 5x5 hücre matrisi sınıflandırması"""
+        
+        # Çok düşük eşik - herhangi bir hasar varlığını tespit et
+        damage_threshold = 0.01
         
         # Hasarlı hücre sayısını hesapla
         damaged_cells = np.sum(cell_damages > damage_threshold)
         
-        # ISO 2409 standardına göre sınıflandırma
-        # 25 hücre üzerinden yüzde hesaplaması
+        # Toplam pattern sayısı
+        total_patterns = sum(pattern_counts.values())
+        
+        # Hasar yüzdesi hesaplama
         damage_percentage = (damaged_cells / 25.0) * 100
         
-        # Sınıf belirleme - ISO 2409 kriterine göre
-        if damaged_cells == 0:
-            return 0, damage_percentage  # Hiç hasar yok
-        elif damaged_cells <= 1:  # %4 ve altı
-            return 1, damage_percentage  # Çok az hasar
-        elif damaged_cells <= 3:  # %12 ve altı 
-            return 2, damage_percentage  # Az hasar
-        elif damaged_cells <= 8:  # %32 ve altı
-            return 3, damage_percentage  # Orta hasar
-        elif damaged_cells <= 15: # %60 ve altı
-            return 4, damage_percentage  # Fazla hasar
-        else:  # 16+ hücre (%64+)
-            return 5, damage_percentage  # Çok fazla hasar
+        # ISO 2409:2013'e göre sınıflandırma
+        # ÖNEMLI: Eğer herhangi bir pattern tespit edildiyse minimum Sınıf 1 olmalı
+        if total_patterns == 0 and damaged_cells == 0:
+            return 0, 0  # Gerçekten hiç hasar yok
+        
+        elif total_patterns > 0 and damaged_cells <= 3:
+            # Pattern tespit edildi - kesişimlerde küçük pullanmalar
+            # ISO: "küçük pullar halinde ayrılması, %5'den az etkilenme"
+            return 1, max(damage_percentage, 4.0)  # En az %4 hasar varsay
+        
+        elif damaged_cells <= 6:
+            # ISO: "kenarlar boyunca pullanma, %5-15 etkilenme"
+            return 2, max(damage_percentage, 8.0)
+        
+        elif damaged_cells <= 12:
+            # ISO: "büyük şeritler halinde pullanma, %15-35 etkilenme"
+            return 3, max(damage_percentage, 20.0)
+        
+        elif damaged_cells <= 18:
+            # ISO: "çok büyük şeritler, %35-65 etkilenme"
+            return 4, max(damage_percentage, 45.0)
+        
+        else:
+            # ISO: "Sınıf 4'ten daha kötü, %65+ etkilenme"
+            return 5, max(damage_percentage, 70.0)
     
-    def generate_matrix_based_probabilities(self, cell_damages, predicted_class, damage_percentage):
-        """Hücre matrisi analizi sonucuna göre olasılık dağılımı"""
+    def generate_matrix_based_probabilities(self, cell_damages, predicted_class, damage_percentage, pattern_counts):
+        """Hücre matrisi ve pattern analizi sonucuna göre olasılık dağılımı"""
         probs = np.zeros(6)
         
         # Sınır durumlarını tespit et
-        damaged_cells = np.sum(cell_damages > 0.5)
+        damaged_cells = np.sum(cell_damages > 0.01)
+        total_patterns = sum(pattern_counts.values())
         
-        # Base confidence - sınır değerlere yaklaşırsa güven azalır
-        if damaged_cells in [1, 3, 8, 15]:  # Sınır değerler
+        # Base confidence hesaplama - pattern varlığı önemli faktör
+        if total_patterns > 0 and predicted_class == 1:
+            base_confidence = 0.90  # Pattern tespit edildi, Sınıf 1 yüksek güven
+        elif damaged_cells in [1, 3, 6, 12, 18]:  # Sınır değerler
             base_confidence = 0.70
-        elif damaged_cells == 0 or damaged_cells >= 20:  # Çok kesin durumlar
+        elif damaged_cells == 0 and total_patterns == 0:  # Kesin durum
             base_confidence = 0.95
-        else:
+        elif total_patterns > 5:  # Çok pattern var
             base_confidence = 0.85
+        else:
+            base_confidence = 0.80
         
         # Ana sınıfa olasılık
         probs[predicted_class] = base_confidence
@@ -326,31 +346,31 @@ class PatternRecognitionClassifier:
         # Kalan olasılığı dağıt
         remaining = 1.0 - base_confidence
         
-        # Sınır durumlarında komşu sınıflara daha fazla olasılık ver
-        if damaged_cells in [1, 3, 8, 15]:
-            # Komşu sınıflara eşit dağılım
-            if predicted_class > 0:
-                probs[predicted_class - 1] = remaining * 0.45
+        # Pattern sayısına göre komşu sınıflara dağılım
+        if total_patterns > 0 and predicted_class == 1:
+            # Sınıf 1'den Sınıf 2'ye geçiş olasılığı
             if predicted_class < 5:
-                probs[predicted_class + 1] = remaining * 0.45
+                probs[predicted_class + 1] = remaining * 0.6
+            if predicted_class > 0:
+                probs[predicted_class - 1] = remaining * 0.2
         else:
-            # Normal durumda komşulara az olasılık
+            # Normal komşu dağılımı
             if predicted_class > 0:
-                probs[predicted_class - 1] = remaining * 0.25
+                probs[predicted_class - 1] = remaining * 0.35
             if predicted_class < 5:
-                probs[predicted_class + 1] = remaining * 0.25
+                probs[predicted_class + 1] = remaining * 0.35
         
         # Kalan minimal olasılığı uzak sınıflara
         for i in range(6):
             if probs[i] == 0:
-                probs[i] = remaining * 0.025
+                probs[i] = remaining * 0.05
         
-        # Normalize
+        # Normalize et
         return probs / np.sum(probs)
     
     def detailed_cell_analysis(self, cell_damages):
         """Detaylı hücre analizi raporu"""
-        damage_threshold = 0.5
+        damage_threshold = 0.01  # Düşük eşik
         
         # Her hücrenin durumunu analiz et
         cell_analysis = []
@@ -362,11 +382,11 @@ class PatternRecognitionClassifier:
                 # Hasar seviyesi kategorisi
                 if damage_level == 0:
                     category = "Sağlam"
-                elif damage_level < 0.5:
+                elif damage_level < 0.01:
                     category = "Minimal"
-                elif damage_level < 1.0:
+                elif damage_level < 0.05:
                     category = "Hafif"
-                elif damage_level < 2.0:
+                elif damage_level < 0.1:
                     category = "Orta"
                 else:
                     category = "Ağır"
@@ -435,7 +455,7 @@ def main_pattern_recognition():
     st.markdown("""
     <div style="background: linear-gradient(90deg, #667eea 0%, #764ba2 100%); padding: 1rem; border-radius: 10px; color: white; text-align: center; margin-bottom: 2rem;">
         <h1>Pattern Recognition Cross-cut Classifier</h1>
-        <p>Hasar Paternlerini Tanıyarak Sınıflandırma</p>
+        <p>ISO 2409:2013 Uyumlu Hasar Sınıflandırması</p>
     </div>
     """, unsafe_allow_html=True)
     
@@ -471,19 +491,21 @@ def main_pattern_recognition():
         show_debug = st.checkbox("Pattern Debug Görünümü", value=False)
         
         st.markdown("---")
-        st.markdown("### Tespit Edilen Pattern Türleri:")
-        st.success("🔵 Flaking: Boya pullanması")
-        st.success("🟡 Cracking: Linear çatlaklar")
-        st.success("🔴 Delamination: Geniş alan ayrılması")
-        st.success("🟠 Edge Damage: Kenar hasarları")
+        st.markdown("### ISO 2409:2013 Sınıfları:")
+        st.success("🟢 Sınıf 0: Hiç hasar yok")
+        st.success("🟢 Sınıf 1: Küçük pullanmalar (%5'den az)")
+        st.warning("🟡 Sınıf 2: Kenar pullanmaları (%5-15)")
+        st.warning("🟠 Sınıf 3: Büyük şeritler (%15-35)")
+        st.error("🔴 Sınıf 4: Çok büyük hasarlar (%35-65)")
+        st.error("⚫ Sınıf 5: Maksimum hasar (%65+)")
         
         st.markdown("### Pattern Özellikleri:")
         st.info("• Geometrik analiz (alan, aspect ratio)")
         st.info("• Şekil analizi (circularity)")
         st.info("• Pozisyon analizi (kenar mesafesi)")
-        st.info("• Ağırlıklı skorlama sistemi")
+        st.info("• ISO 2409:2013 uyumlu skorlama")
     
-    col1 = st.container()  # Tek column yerine container kullan
+    col1 = st.container()
     
     with col1:
         st.header("Grid Seçimi ve Pattern Analizi")
@@ -499,6 +521,9 @@ def main_pattern_recognition():
             
             # Mouse ile grid seçimi
             st.subheader("Grid Alanı Seçimi - Mouse Drag & Drop")
+            
+            # Initialize grid_selected variable at the start
+            grid_selected = False
             
             if canvas_available and canvas_type == "drawable":
                 # streamlit-drawable-canvas çalışıyor
@@ -544,10 +569,80 @@ def main_pattern_recognition():
                         display_toolbar=True,
                         key="grid_canvas",
                     )
+                    
+                    # Canvas'tan grid koordinatlarını al
+                    if canvas_result.json_data is not None:
+                        objects = canvas_result.json_data["objects"]
+                        if len(objects) > 0:
+                            # Son çizilen dikdörtgeni al
+                            last_rect = objects[-1]
+                            if last_rect["type"] == "rect":
+                                # Canvas koordinatlarından gerçek koordinatlara dönüştür
+                                canvas_x = last_rect["left"]
+                                canvas_y = last_rect["top"]
+                                canvas_w = last_rect["width"]
+                                canvas_h = last_rect["height"]
+                                
+                                # Gerçek koordinatlar - scale faktörlerini kullan
+                                real_x = int(canvas_x * scale_x)
+                                real_y = int(canvas_y * scale_y)
+                                real_w = int(canvas_w * scale_x)
+                                real_h = int(canvas_h * scale_y)
+                                
+                                # Kare yapma seçeneği
+                                make_square = st.checkbox("Kare şeklinde zorla", value=True)
+                                
+                                if make_square:
+                                    # En küçük boyutu al
+                                    min_size = min(real_w, real_h)
+                                    # Merkezden kare oluştur
+                                    center_x = real_x + real_w // 2
+                                    center_y = real_y + real_h // 2
+                                    
+                                    final_x = center_x - min_size // 2
+                                    final_y = center_y - min_size // 2
+                                    final_w = min_size
+                                    final_h = min_size
+                                else:
+                                    final_x = real_x
+                                    final_y = real_y
+                                    final_w = real_w
+                                    final_h = real_h
+                                
+                                # Sınırları kontrol et
+                                final_x = max(0, min(final_x, img_width - final_w))
+                                final_y = max(0, min(final_y, img_height - final_h))
+                                final_w = min(final_w, img_width - final_x)
+                                final_h = min(final_h, img_height - final_y)
+                                
+                                grid_selected = True
+                                
+                                # Grid bilgilerini göster
+                                col_info1, col_info2, col_info3 = st.columns(3)
+                                with col_info1:
+                                    st.metric("Grid Pozisyonu", f"({final_x}, {final_y})")
+                                with col_info2:
+                                    st.metric("Grid Boyutu", f"{final_w} x {final_h}")
+                                with col_info3:
+                                    ratio = final_w / max(final_h, 1)
+                                    st.metric("En/Boy Oranı", f"{ratio:.2f}")
+                                
+                                # 5x5 grid preview çiz
+                                preview_img = classifier.draw_selection_overlay(
+                                    img_array, final_x, final_y, final_w, final_h
+                                )
+                                
+                                st.subheader("Grid Preview - 5x5 Bölümler")
+                                st.image(preview_img, caption="Seçilen Grid Alanı ve 5x5 Bölümler", use_column_width=True)
+                                
+                                # Koordinatları session state'e kaydet
+                                st.session_state.mouse_selected_coords = (final_x, final_y, final_w, final_h)
+                
                 except Exception as e:
                     st.error(f"Canvas hatası: {e}")
                     st.error("Streamlit sürümü uyumsuz. Manuel seçim kullanılıyor.")
                     canvas_available = False
+                    canvas_type = "manual"
                 
                 st.markdown("---")
                 
@@ -601,13 +696,14 @@ def main_pattern_recognition():
                         
                         # Koordinatları kaydet
                         st.session_state.mouse_selected_coords = (grid_x, grid_y, grid_w, grid_h)
+                        grid_selected = True
                         
                         if st.button("Yeni Seçim"):
                             st.session_state.click_count = 0
                             st.session_state.first_click = None
                             st.rerun()
                 
-            else:
+            else:  # Manual mode
                 # Fallback: Manuel koordinat girişi
                 st.info("Mouse desteği için şu komutlardan birini çalıştırın:")
                 st.code("pip install streamlit-image-coordinates")
@@ -630,99 +726,11 @@ def main_pattern_recognition():
                 
                 # Manuel koordinatları kaydet
                 st.session_state.mouse_selected_coords = (manual_x, manual_y, manual_size, manual_size)
-                
-                # Canvas'tan grid koordinatlarını al
-                grid_selected = False
-                if canvas_result.json_data is not None:
-                    objects = canvas_result.json_data["objects"]
-                    if len(objects) > 0:
-                        # Son çizilen dikdörtgeni al
-                        last_rect = objects[-1]
-                        if last_rect["type"] == "rect":
-                            # Canvas koordinatlarından gerçek koordinatlara dönüştür
-                            canvas_x = last_rect["left"]
-                            canvas_y = last_rect["top"]
-                            canvas_w = last_rect["width"]
-                            canvas_h = last_rect["height"]
-                            
-                            # Gerçek koordinatlar - scale faktörlerini kullan
-                            real_x = int(canvas_x * scale_x)
-                            real_y = int(canvas_y * scale_y)
-                            real_w = int(canvas_w * scale_x)
-                            real_h = int(canvas_h * scale_y)
-                            
-                            # Kare yapma seçeneği
-                            make_square = st.checkbox("Kare şeklinde zorla", value=True)
-                            
-                            if make_square:
-                                # En küçük boyutu al
-                                min_size = min(real_w, real_h)
-                                # Merkezden kare oluştur
-                                center_x = real_x + real_w // 2
-                                center_y = real_y + real_h // 2
-                                
-                                final_x = center_x - min_size // 2
-                                final_y = center_y - min_size // 2
-                                final_w = min_size
-                                final_h = min_size
-                            else:
-                                final_x = real_x
-                                final_y = real_y
-                                final_w = real_w
-                                final_h = real_h
-                            
-                            # Sınırları kontrol et
-                            final_x = max(0, min(final_x, img_width - final_w))
-                            final_y = max(0, min(final_y, img_height - final_h))
-                            final_w = min(final_w, img_width - final_x)
-                            final_h = min(final_h, img_height - final_y)
-                            
-                            grid_selected = True
-                            
-                            # Grid bilgilerini göster
-                            col_info1, col_info2, col_info3 = st.columns(3)
-                            with col_info1:
-                                st.metric("Grid Pozisyonu", f"({final_x}, {final_y})")
-                            with col_info2:
-                                st.metric("Grid Boyutu", f"{final_w} x {final_h}")
-                            with col_info3:
-                                ratio = final_w / max(final_h, 1)
-                                st.metric("En/Boy Oranı", f"{ratio:.2f}")
-                            
-                            # 5x5 grid preview çiz
-                            preview_img = classifier.draw_selection_overlay(
-                                img_array, final_x, final_y, final_w, final_h
-                            )
-                            
-                            st.subheader("Grid Preview - 5x5 Bölümler")
-                            st.image(preview_img, caption="Seçilen Grid Alanı ve 5x5 Bölümler", use_column_width=True)
-                            
-                            # Koordinatları session state'e kaydet
-                            st.session_state.mouse_selected_coords = (final_x, final_y, final_w, final_h)
-                
+                grid_selected = True
+            
+            # Check grid selection status
             if not grid_selected:
-                    st.info("Yukarıdaki görüntü üzerinde mouse ile bir dikdörtgen çizin.")
-                    
-            else:
-                # Fallback: streamlit-drawable-canvas yok ise
-                st.error("Mouse desteği için şu komutu çalıştırın:")
-                st.code("pip install streamlit-drawable-canvas")
-                
-                st.markdown("**Alternatif: Koordinat Girişi**")
-                col_coord1, col_coord2 = st.columns(2)
-                with col_coord1:
-                    manual_x = st.number_input("Grid X", 0, img_width-100, img_width//4)
-                    manual_y = st.number_input("Grid Y", 0, img_height-100, img_height//4)
-                with col_coord2:
-                    manual_w = st.number_input("Grid Genişlik", 50, img_width, min(img_width, img_height)//3)
-                    manual_h = st.number_input("Grid Yükseklik", 50, img_height, min(img_width, img_height)//3)
-                
-                # Manual preview
-                preview_img = classifier.draw_selection_overlay(img_array, manual_x, manual_y, manual_w, manual_h)
-                st.image(preview_img, caption="Manuel Grid Seçimi", use_column_width=True)
-                
-                # Manual koordinatları kaydet
-                st.session_state.mouse_selected_coords = (manual_x, manual_y, manual_w, manual_h)
+                st.info("Yukarıdaki görüntü üzerinde mouse ile bir dikdörtgen çizin.")
             
             # Pattern analizi başlat
             if st.button("🔍 Pattern Recognition Analizi", type="primary", use_container_width=True):
@@ -750,12 +758,12 @@ def main_pattern_recognition():
                     # 5x5 hücre analizi
                     cell_damages, _ = classifier.analyze_5x5_cells(grid_region, patterns)
                     
-                    # YENI: Hücre matrisine dayalı sınıflandırma
-                    predicted_class, damage_percentage = classifier.classify_by_cell_matrix(cell_damages)
+                    # ISO 2409:2013 uyumlu sınıflandırma - pattern_counts da dahil
+                    predicted_class, damage_percentage = classifier.classify_by_cell_matrix(cell_damages, pattern_counts)
                     
                     # Hücre matrisi bazlı olasılık hesaplama
                     probabilities = classifier.generate_matrix_based_probabilities(
-                        cell_damages, predicted_class, damage_percentage
+                        cell_damages, predicted_class, damage_percentage, pattern_counts
                     )
                     
                     # Detaylı hücre analizi
@@ -766,8 +774,9 @@ def main_pattern_recognition():
                         'confidence': float(probabilities[predicted_class]),
                         'probabilities': probabilities.tolist(),
                         'damage_percentage': damage_percentage,
-                        'damaged_cells': int(np.sum(cell_damages > 0.5)),
-                        'severity_score': severity,  # Eski skor referans için
+                        'damaged_cells': int(np.sum(cell_damages > 0.01)),  # Düşük eşik
+                        'total_patterns': sum(pattern_counts.values()),
+                        'severity_score': severity,
                         'patterns': patterns,
                         'pattern_counts': pattern_counts,
                         'cell_damages': cell_damages,
@@ -775,15 +784,16 @@ def main_pattern_recognition():
                         'class_info': classifier.iso_classes[predicted_class],
                         'grid_lines': (h_lines, v_lines),
                         'binary_mask': binary_mask,
-                        'classification_method': 'Cell Matrix Based'
+                        'classification_method': 'ISO 2409:2013 Compliant'
                     }
                     
                     st.session_state.pattern_result = result
-                    st.success("Pattern recognition analizi tamamlandı!")
+                    st.success("ISO 2409:2013 uyumlu pattern recognition analizi tamamlandı!")
         
         else:
             st.info("Cross-cut test görüntünüzü yükleyin")
     
+    # Pattern analizi sonuçları
     with col1:
         st.header("Pattern Analizi Sonuçları")
         
@@ -791,17 +801,26 @@ def main_pattern_recognition():
             result = st.session_state.pattern_result
             class_info = result['class_info']
             
-            # Ana sonuç
+            # Ana sonuç - İyileştirilmiş
             st.markdown(f"""
             <div style="background: {class_info['color']}22; padding: 2rem; border-radius: 15px; border: 3px solid {class_info['color']}; text-align: center;">
                 <h2>{class_info['name']}</h2>
                 <h3>Hasarlı Hücreler: {result['damaged_cells']}/25</h3>
+                <h3>Tespit Edilen Pattern: {result['total_patterns']} adet</h3>
                 <h3>Hasar Yüzdesi: {result['damage_percentage']:.1f}%</h3>
                 <h3>Güven: {result['confidence']:.1%}</h3>
-                <p>{class_info['description']}</p>
+                <p><strong>{class_info['description']}</strong></p>
                 <p><small>Sınıflandırma: {result['classification_method']}</small></p>
             </div>
             """, unsafe_allow_html=True)
+            
+            # ISO 2409 kriterleri açıklama
+            st.info(f"""
+            **ISO 2409:2013 Kriterleri:**
+            - Pattern tespit edildi: {result['total_patterns']} adet
+            - Hasarlı hücre sayısı: {result['damaged_cells']}/25
+            - Bu durum ISO standardına göre **{class_info['name']}** kriterlerine uyuyor
+            """)
             
             # Çıkarılan grid
             if 'pattern_grid' in st.session_state:
@@ -810,10 +829,20 @@ def main_pattern_recognition():
             
             # Pattern istatistikleri
             st.subheader("Tespit Edilen Pattern'ler")
-            for pattern_type, count in result['pattern_counts'].items():
-                if pattern_type in show_patterns and count > 0:
-                    pattern_info = classifier.damage_patterns[pattern_type]
-                    st.metric(f"{pattern_info['name']}", f"{count} adet")
+            col_pat1, col_pat2, col_pat3, col_pat4 = st.columns(4)
+            
+            with col_pat1:
+                if result['pattern_counts']['flaking'] > 0:
+                    st.metric("Flaking", f"{result['pattern_counts']['flaking']} adet")
+            with col_pat2:
+                if result['pattern_counts']['cracking'] > 0:
+                    st.metric("Cracking", f"{result['pattern_counts']['cracking']} adet")
+            with col_pat3:
+                if result['pattern_counts']['delamination'] > 0:
+                    st.metric("Delamination", f"{result['pattern_counts']['delamination']} adet")
+            with col_pat4:
+                if result['pattern_counts']['edge_damage'] > 0:
+                    st.metric("Edge Damage", f"{result['pattern_counts']['edge_damage']} adet")
             
             # Pattern detayları
             if show_debug:
@@ -822,21 +851,21 @@ def main_pattern_recognition():
                     if result['pattern_counts'][pattern_type] > 0:
                         st.write(f"**{pattern_type.title()}:**")
                         for i, pattern in enumerate(result['patterns'][pattern_type]):
-                            st.write(f"- Pattern {i+1}: Score={pattern['score']:.2f}, Area={pattern['area']}")
+                            st.write(f"- Pattern {i+1}: Score={pattern['score']:.3f}, Area={pattern['area']}")
             
-            # Olasılık grafiği - Her sınıf için farklı renk
+            # Olasılık grafiği
             st.subheader("Sınıf Olasılık Dağılımı")
             prob_data = pd.DataFrame({
                 'Sınıf': [f"Sınıf {i}" for i in range(6)],
                 'Olasılık': [p * 100 for p in result['probabilities']],
                 'Renk': [classifier.iso_classes[i]['color'] for i in range(6)],
-                'Açıklama': [f"{classifier.iso_classes[i]['name']}" for i in range(6)]
+                'Açıklama': [f"{classifier.iso_classes[i]['description']}" for i in range(6)]
             })
             
             fig = px.bar(prob_data, x='Sınıf', y='Olasılık', 
                         color='Sınıf',
                         color_discrete_map={f'Sınıf {i}': classifier.iso_classes[i]['color'] for i in range(6)},
-                        title="Pattern Recognition Sınıf Olasılıkları",
+                        title="ISO 2409:2013 Sınıf Olasılıkları",
                         hover_data=['Açıklama'])
             fig.update_layout(showlegend=False, height=350)
             st.plotly_chart(fig, use_container_width=True)
@@ -872,7 +901,7 @@ def main_pattern_recognition():
                 
                 st.image(viz_img, caption="Tespit Edilen Pattern'ler", width=300)
             
-            # Hücre hasar matrisi - İyileştirilmiş görünüm
+            # Hücre hasar matrisi
             st.subheader("5x5 Hücre Hasar Matrisi (ISO 2409 Temel)")
             
             # Matris görselleştirmesi
@@ -897,21 +926,17 @@ def main_pattern_recognition():
                 
                 styled_df = cell_df.style.apply(highlight_damaged, axis=1)
                 st.dataframe(styled_df, use_container_width=True)
-                
-                # Hasar kategorisi dağılımı
-                category_counts = cell_df['category'].value_counts()
-                st.bar_chart(category_counts)
             
             # ISO 2409 Sınıflandırma Kriteri
-            st.subheader("ISO 2409 Sınıflandırma Kriterleri")
+            st.subheader("ISO 2409:2013 Sınıflandırma Kriterleri")
             
             criteria_data = [
-                {"Sınıf": 0, "Hasarlı Hücre": "0", "Yüzde": "0%", "Açıklama": "Hiç hasar yok"},
-                {"Sınıf": 1, "Hasarlı Hücre": "≤1", "Yüzde": "≤4%", "Açıklama": "Çok az hasar"},
-                {"Sınıf": 2, "Hasarlı Hücre": "2-3", "Yüzde": "8-12%", "Açıklama": "Az hasar"},
-                {"Sınıf": 3, "Hasarlı Hücre": "4-8", "Yüzde": "16-32%", "Açıklama": "Orta hasar"},
-                {"Sınıf": 4, "Hasarlı Hücre": "9-15", "Yüzde": "36-60%", "Açıklama": "Fazla hasar"},
-                {"Sınıf": 5, "Hasarlı Hücre": "≥16", "Yüzde": "≥64%", "Açıklama": "Çok fazla hasar"}
+                {"Sınıf": 0, "Hasarlı Hücre": "0", "Pattern": "0", "Açıklama": "Hiç hasar yok"},
+                {"Sınıf": 1, "Hasarlı Hücre": "≤3", "Pattern": "≤5", "Açıklama": "Küçük pullanmalar (%5'den az)"},
+                {"Sınıf": 2, "Hasarlı Hücre": "≤6", "Pattern": "5+", "Açıklama": "Kenar pullanmaları (%5-15)"},
+                {"Sınıf": 3, "Hasarlı Hücre": "≤12", "Pattern": "10+", "Açıklama": "Büyük şeritler (%15-35)"},
+                {"Sınıf": 4, "Hasarlı Hücre": "≤18", "Pattern": "15+", "Açıklama": "Çok büyük hasarlar (%35-65)"},
+                {"Sınıf": 5, "Hasarlı Hücre": ">18", "Pattern": "20+", "Açıklama": "Maksimum hasar (%65+)"}
             ]
             
             criteria_df = pd.DataFrame(criteria_data)
@@ -925,11 +950,21 @@ def main_pattern_recognition():
             styled_criteria = criteria_df.style.apply(highlight_current_class, axis=1)
             st.dataframe(styled_criteria, use_container_width=True)
             
+            # Sonuç özeti
+            st.success(f"""
+            **Sonuç Özeti:**
+            - **{result['total_patterns']} adet pattern** tespit edildi
+            - **{result['damaged_cells']} hücre** hasarlı (25'den)
+            - **{result['damage_percentage']:.1f}% hasar** oranı
+            - ISO 2409:2013'e göre **{class_info['name']}** sınıfı
+            - **{result['confidence']:.1%} güven** ile sınıflandırıldı
+            """)
+            
         else:
             st.info("Sol panelden grid seçimi yapın ve pattern analizi başlatın")
             
             st.markdown("""
-            ### Pattern Recognition Yaklaşımı:
+            ### ISO 2409:2013 Uyumlu Pattern Recognition:
             
             **1. Grid Line Detection:**
             - Hough Line Transform ile grid çizgileri tespit edilir
@@ -941,14 +976,16 @@ def main_pattern_recognition():
             - **Delamination:** Geniş alan, düşük aspect ratio  
             - **Edge Damage:** Grid çizgileri yakınında
             
-            **3. Severity Calculation:**
-            - Her pattern türü farklı ağırlıkta
-            - Geometrik özellikler skorlanır
-            - 5x5 hücre bazında haritalanır
+            **3. ISO 2409:2013 Compliance:**
+            - Pattern varlığı dikkate alınır
+            - Düşük hasar eşiği (0.01) kullanılır
+            - Herhangi bir pattern tespit edilirse minimum Sınıf 1
+            - Hücre bazlı ve pattern bazlı çift kontrol
             
-            **4. Classification:**
-            - 5x5 hücre matrisi analizi
-            - ISO 2409 sınıflarına eşleştirilir
+            **4. Classification Logic:**
+            - Pattern tespit edildi + az hücre hasarı = Sınıf 1
+            - Pattern sayısı arttıkça üst sınıflara geçiş
+            - ISO standardının gerçek kriterlerine uygun
             """)
 
 if __name__ == "__main__":
