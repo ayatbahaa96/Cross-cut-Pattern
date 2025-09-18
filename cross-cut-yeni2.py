@@ -439,6 +439,20 @@ def main_pattern_recognition():
     </div>
     """, unsafe_allow_html=True)
     
+    # Canvas availability check - fonksiyon içinde
+    try:
+        from streamlit_drawable_canvas import st_canvas
+        canvas_available = True
+        canvas_type = "drawable"
+    except ImportError:
+        try:
+            from streamlit_image_coordinates import streamlit_image_coordinates
+            canvas_available = True
+            canvas_type = "coordinates"
+        except ImportError:
+            canvas_available = False
+            canvas_type = "manual"
+    
     if 'pattern_classifier' not in st.session_state:
         st.session_state.pattern_classifier = PatternRecognitionClassifier()
     
@@ -486,7 +500,7 @@ def main_pattern_recognition():
             # Mouse ile grid seçimi
             st.subheader("Grid Alanı Seçimi - Mouse Drag & Drop")
             
-            if CANVAS_AVAILABLE == True:
+            if canvas_available and canvas_type == "drawable":
                 # streamlit-drawable-canvas çalışıyor
                 st.markdown("""
                 <div style="background: #e8f4fd; padding: 15px; border-left: 5px solid #3498db; margin: 15px 0;">
@@ -533,12 +547,12 @@ def main_pattern_recognition():
                     )
                 except Exception as e:
                     st.error(f"Canvas hatası: {e}")
-                    st.error("Streamlit sürümü uyumsuz. Alternatif coordinate picker kullanılıyor.")
-                    CANVAS_AVAILABLE = False
+                    st.error("Streamlit sürümü uyumsuz. Manuel seçim kullanılıyor.")
+                    canvas_available = False
                 
                 st.markdown("---")
                 
-            elif CANVAS_AVAILABLE == "coordinates":
+            elif canvas_available and canvas_type == "coordinates":
                 # streamlit-image-coordinates kullan
                 st.markdown("""
                 <div style="background: #e8f4fd; padding: 15px; border-left: 5px solid #3498db; margin: 15px 0;">
@@ -596,7 +610,7 @@ def main_pattern_recognition():
                 
             else:
                 # Fallback: Manuel koordinat girişi
-                st.error("Mouse desteği için şu komutlardan birini çalıştırın:")
+                st.info("Mouse desteği için şu komutlardan birini çalıştırın:")
                 st.code("pip install streamlit-image-coordinates")
                 st.code("# veya")  
                 st.code("pip install streamlit-drawable-canvas==0.8.0")
@@ -690,26 +704,26 @@ def main_pattern_recognition():
                 if not grid_selected:
                     st.info("Yukarıdaki görüntü üzerinde mouse ile bir dikdörtgen çizin.")
                     
-                else:
+            else:
                 # Fallback: streamlit-drawable-canvas yok ise
-                    st.error("Mouse desteği için şu komutu çalıştırın:")
-                    st.code("pip install streamlit-drawable-canvas")
-                    
-                    st.markdown("**Alternatif: Koordinat Girişi**")
-                    col_coord1, col_coord2 = st.columns(2)
-                    with col_coord1:
-                        manual_x = st.number_input("Grid X", 0, img_width-100, img_width//4)
-                        manual_y = st.number_input("Grid Y", 0, img_height-100, img_height//4)
-                    with col_coord2:
-                        manual_w = st.number_input("Grid Genişlik", 50, img_width, min(img_width, img_height)//3)
-                        manual_h = st.number_input("Grid Yükseklik", 50, img_height, min(img_width, img_height)//3)
-                    
-                    # Manual preview
-                    preview_img = classifier.draw_selection_overlay(img_array, manual_x, manual_y, manual_w, manual_h)
-                    st.image(preview_img, caption="Manuel Grid Seçimi", use_column_width=True)
-                    
-                    # Manual koordinatları kaydet
-                    st.session_state.mouse_selected_coords = (manual_x, manual_y, manual_w, manual_h)
+                st.error("Mouse desteği için şu komutu çalıştırın:")
+                st.code("pip install streamlit-drawable-canvas")
+                
+                st.markdown("**Alternatif: Koordinat Girişi**")
+                col_coord1, col_coord2 = st.columns(2)
+                with col_coord1:
+                    manual_x = st.number_input("Grid X", 0, img_width-100, img_width//4)
+                    manual_y = st.number_input("Grid Y", 0, img_height-100, img_height//4)
+                with col_coord2:
+                    manual_w = st.number_input("Grid Genişlik", 50, img_width, min(img_width, img_height)//3)
+                    manual_h = st.number_input("Grid Yükseklik", 50, img_height, min(img_width, img_height)//3)
+                
+                # Manual preview
+                preview_img = classifier.draw_selection_overlay(img_array, manual_x, manual_y, manual_w, manual_h)
+                st.image(preview_img, caption="Manuel Grid Seçimi", use_column_width=True)
+                
+                # Manual koordinatları kaydet
+                st.session_state.mouse_selected_coords = (manual_x, manual_y, manual_w, manual_h)
             
             # Pattern analizi başlat
             if st.button("🔍 Pattern Recognition Analizi", type="primary", use_container_width=True):
@@ -771,7 +785,7 @@ def main_pattern_recognition():
         else:
             st.info("Cross-cut test görüntünüzü yükleyin")
     
-    with col1:
+    with col2:
         st.header("Pattern Analizi Sonuçları")
         
         if 'pattern_result' in st.session_state:
